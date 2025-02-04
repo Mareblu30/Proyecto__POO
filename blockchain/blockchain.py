@@ -1,130 +1,139 @@
 import datetime
 import hashlib
 import json
+import os
+import requests
 from flask import Flask, jsonify, request
-
-class Document:
-    def __init__(self, content, doc_type='general', version='1.0'):
-        self.content = content
-        self.metadata = {
-            'created_at': str(datetime.datetime.now()),
-            'type': doc_type,
-            'version': version
-        }
-
-    def to_dict(self):
-        return {
-            'content': self.content,
-            'metadata': self.metadata
-        }
-
-class Transaction:
-    def __init__(self, blockchain):
-        self.blockchain = blockchain
-
-    def add_document(self, document):
-        # Obtener el bloque anterior y realizar el algoritmo de prueba de trabajo
-        previous_block = self.blockchain.get_previous_block()
-        previous_proof = previous_block['proof']
-        proof = self.blockchain.proof_of_work(previous_proof)
-        previous_hash = self.blockchain.hash(previous_block)
-
-        # Crear el bloque con el nuevo documento
-        block = self.blockchain.create_block(proof, previous_hash, document.to_dict())
-
-        return block
-
-class DocumentBlockchain:
-    def __init__(self):
-        self.chain = []
-        # Se crea el bloque génesis
-        self.create_block(proof=1, previous_hash='0', document=None)
-
-    def create_block(self, proof, previous_hash, document):
-        # Crear un nuevo bloque
-        block = {
-            'index': len(self.chain) + 1,
-            'timestamp': str(datetime.datetime.now()),
-            'document': document,
-            'proof': proof,
-            'previous_hash': previous_hash
-        }
-        self.chain.append(block)
-        return block
-
-    def get_previous_block(self):
-        return self.chain[-1]
-
-    def proof_of_work(self, previous_proof):
-        # Algoritmo de prueba de trabajo (minado)
-        new_proof = 1
-        check_proof = False
-
-        while check_proof is False:
-            hash_operation = hashlib.sha256(str(new_proof**2 - previous_proof**2).encode()).hexdigest()
-            if hash_operation[:4] == '0000':
-                check_proof = True
-            else:
-                new_proof += 1
-        return new_proof
-
-    def hash(self, block):
-        # Crear un hash de un bloque
-        encoded_block = json.dumps(block, sort_keys=True).encode()
-        return hashlib.sha256(encoded_block).hexdigest()
-
-    def is_chain_valid(self, chain):
-        # Verificar si la cadena es válida
-        previous_block = chain[0]
-        block_index = 1
-        while block_index < len(chain):
-            block = chain[block_index]
-            if block['previous_hash'] != self.hash(previous_block):
-                return False
-            previous_proof = previous_block['proof']
-            proof = block['proof']
-            hash_operation = hashlib.sha256(str(proof**2 - previous_proof**2).encode()).hexdigest()
-            if hash_operation[:4] != '0000':
-                return False
-            previous_block = block
-            block_index += 1
-        return True
 
 # Configuración de Flask
 app = Flask(__name__)
-blockchain = DocumentBlockchain()
-transaction = Transaction(blockchain)
 
-@app.route("/add_document", methods=['POST'])
-def add_document():
-    # Obtener los datos del documento desde la solicitud
-    data = request.get_json()
+# API de IPFS (debe estar corriendo el daemon en cada nodo)
+IPFS_API = "http://127.0.0.1:5001/api/v0"
 
-    # Verifica si los datos contienen contenido
-    if not data or 'content' not in data:
-        return jsonify({'error': 'No document content provided'}), 400
+# Lista de nodos en la red (ajustar según sea necesario)
+nodos = [
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5001",
+    "http://127.0.0.1:5002",
+    "http://127.0.0.1:5003",
+    "http://127.0.0.1:5004",
+]
 
-    # Crear el documento usando la clase Document
-    document = Document(content=data['content'], doc_type=data.get('type', 'general'))
+class Documento:
+    def __init__(self, contenido, tipo='general', version='1.0'):
+        self.contenido = contenido
+        self.metadatos = {
+            'creado_en': str(datetime.datetime.now()),
+            'tipo': tipo,
+            'version': version
+        }
 
-    # Usar la clase Transaction para agregar el documento a la cadena de bloques
-    block = transaction.add_document(document)
+    def a_diccionario(self):
+        return {
+            'contenido': self.contenido,
+            'metadatos': self.metadatos
+        }
 
-    response = {
-        'message': 'Documento añadido exitosamente',
-        'block': block
-    }
+class BlockchainDocumentos:
+    def __init__(self):
+        self.cadena = []
+        self.crear_bloque(prueba=1, hash_anterior='0', documento=None)
 
-    return jsonify(response), 201
+    def crear_bloque(self, prueba, hash_anterior, documento):
+        bloque = {
+            'indice': len(self.cadena) + 1,
+            'timestamp': str(datetime.datetime.now()),
+            'documento': documento,
+            'prueba': prueba,
+            'hash_anterior': hash_anterior
+        }
+        self.cadena.append(bloque)
+        return bloque
 
-@app.route("/get_chain", methods=['GET'])
-def get_chain():
-    # Obtener la cadena de bloques y devolverla
-    response = {
-        'chain': blockchain.chain,
-        'length': len(blockchain.chain)
-    }
-    return jsonify(response), 200
+    def obtener_bloque_anterior(self):
+        return self.cadena[-1]
+
+    def prueba_de_trabajo(self, prueba_anterior):
+        nueva_prueba = 1
+        prueba_valida = False
+        while not prueba_valida:
+            operacion_hash = hashlib.sha256(str(nueva_prueba**2 - prueba_anterior**2).encode()).hexdigest()
+            if operacion_hash[:4] == '0000':
+                prueba_valida = True
+            else:
+                nueva_prueba += 1
+        return nueva_prueba
+
+    def calcular_hash(self, bloque):
+        bloque_codificado = json.dumps(bloque, sort_keys=True).encode()
+        return hashlib.sha256(bloque_codificado).hexdigest()
+
+    def es_cadena_valida(self, cadena):
+        bloque_anterior = cadena[0]
+        indice_bloque = 1
+        while indice_bloque < len(cadena):
+            bloque = cadena[indice_bloque]
+            if bloque['hash_anterior'] != self.calcular_hash(bloque_anterior):
+                return False
+            prueba_anterior = bloque_anterior['prueba']
+            prueba = bloque['prueba']
+            operacion_hash = hashlib.sha256(str(prueba**2 - prueba_anterior**2).encode()).hexdigest()
+            if operacion_hash[:4] != '0000':
+                return False
+            bloque_anterior = bloque
+            indice_bloque += 1
+        return True
+
+# Inicializar blockchain
+documentos_blockchain = BlockchainDocumentos()
+
+@app.route("/subir_archivo", methods=['POST'])
+def subir_archivo():
+    if 'archivo' not in request.files:
+        return jsonify({'error': 'No se encontró ningún archivo'}), 400
+
+    archivo = request.files['archivo']
+    archivos = {'file': (archivo.filename, archivo.stream, archivo.content_type)}
+
+    # Subir archivo a IPFS
+    respuesta = requests.post(IPFS_API + "/add", files=archivos)
+    if respuesta.status_code == 200:
+        ipfs_hash = respuesta.json()["Hash"]
+
+        # Crear documento en la blockchain con el hash de IPFS
+        documento = Documento(contenido=ipfs_hash, tipo=archivo.content_type)
+        bloque_anterior = documentos_blockchain.obtener_bloque_anterior()
+        prueba = documentos_blockchain.prueba_de_trabajo(bloque_anterior['prueba'])
+        hash_anterior = documentos_blockchain.calcular_hash(bloque_anterior)
+        bloque = documentos_blockchain.crear_bloque(prueba, hash_anterior, documento.a_diccionario())
+
+        return jsonify({'mensaje': 'Archivo subido a IPFS y registrado en blockchain',
+                        'ipfs_hash': ipfs_hash,
+                        'bloque': bloque}), 201
+    return jsonify({'error': 'No se pudo subir el archivo a IPFS'}), 500
+
+@app.route("/obtener_cadena", methods=['GET'])
+def obtener_cadena():
+    return jsonify({'cadena': documentos_blockchain.cadena, 'longitud': len(documentos_blockchain.cadena)}), 200
+
+@app.route("/obtener_archivo/<ipfs_hash>", methods=['GET'])
+def obtener_archivo(ipfs_hash):
+    return jsonify({'archivo_url': f"https://ipfs.io/ipfs/{ipfs_hash}"}), 200
+
+@app.route("/sincronizar_nodos", methods=['GET'])
+def sincronizar_nodos():
+    for nodo in nodos:
+        try:
+            respuesta = requests.get(f"{nodo}/obtener_cadena")
+            if respuesta.status_code == 200:
+                datos_nodo = respuesta.json()
+                cadena_nodo = datos_nodo['cadena']
+                if len(cadena_nodo) > len(documentos_blockchain.cadena) and documentos_blockchain.es_cadena_valida(cadena_nodo):
+                    documentos_blockchain.cadena = cadena_nodo
+        except requests.exceptions.RequestException:
+            continue
+    return jsonify({'mensaje': 'Nodos sincronizados', 'cadena': documentos_blockchain.cadena}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
