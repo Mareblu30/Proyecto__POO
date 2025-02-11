@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 import threading
 import requests
 from flask import Flask, jsonify, request
@@ -14,18 +15,56 @@ app = Flask(__name__)
 IPFS_API_BASE = "http://127.0.0.1:{}/api/v0"
 NODO_PUERTOS = [5001, 5002, 5003, 5004, 5005]
 
+def iniciar_ipfs_nodos(cantidad_nodos):
+    nodos = []
+    for i in range(cantidad_nodos):
+        puerto_api = 5001 + i  # Puerto API de cada nodo
+        puerto_gateway = 8081 + i  # Puerto Gateway de cada nodo
+        carpeta_repo = f"ipfs_repo_{i}"  # Carpeta de configuración para cada nodo
+
+        # Crear un directorio diferente para cada nodo
+        if not os.path.exists(carpeta_repo):
+            subprocess.run(["ipfs", "init", "--profile", "server"], env={"IPFS_PATH": carpeta_repo})
+
+        # Configurar el nodo con un puerto distinto
+        subprocess.run(["ipfs", "config", "Addresses.API", f"/ip4/127.0.0.1/tcp/{puerto_api}"], env={"IPFS_PATH": carpeta_repo})
+        subprocess.run(["ipfs", "config", "Addresses.Gateway", f"/ip4/127.0.0.1/tcp/{puerto_gateway}"], env={"IPFS_PATH": carpeta_repo})
+
+        # Iniciar el daemon de IPFS en segundo plano
+        proceso = subprocess.Popen(["ipfs", "daemon"], env={"IPFS_PATH": carpeta_repo}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        nodos.append(proceso)
+
+        print(f"🟢 Nodo {i} iniciado en puertos API {puerto_api} y Gateway {puerto_gateway}")
+        time.sleep(2)  # Dar tiempo a que los nodos arranquen
+
+    return nodos
+
+def conectar_nodos_ipfs(cantidad_nodos):
+    for i in range(cantidad_nodos):
+        puerto_api = 5001 + i
+        for j in range(cantidad_nodos):
+            if i != j:
+                puerto_peer = 5001 + j
+                direccion_peer = f"/ip4/127.0.0.1/tcp/{puerto_peer}"
+
+                # Conectar el nodo actual con el otro nodo
+                response = requests.post(f"http://127.0.0.1:{puerto_api}/api/v0/swarm/connect?arg={direccion_peer}")
+                if response.status_code == 200:
+                    print(f"🔗 Nodo {i} conectado a {j}")
+                else:
+                    print(f"⚠️ Error al conectar Nodo {i} con {j}")
+
+# Llamar la función para iniciar los 5 nodos
+nodos_ipfs = iniciar_ipfs_nodos(5)
+
+# Llamar la función para conectar los nodos
+conectar_nodos_ipfs(5)
+
 class IPFSManager:
     """Clase para manejar la conexión con IPFS y la gestión de nodos."""
     def __init__(self, puerto):
         self.ipfs_api = IPFS_API_BASE.format(puerto)
         self.puerto = puerto
-        self.iniciar_ipfs()
-
-    def iniciar_ipfs(self):
-        """Verifica e inicia IPFS automáticamente."""
-        if not os.path.exists(os.path.expanduser("~/.ipfs")):
-            subprocess.run(["ipfs", "init"], check=True)
-        subprocess.Popen(["ipfs", "daemon", "--api-port", str(self.puerto)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def subir_archivo(self, file):
         """Sube un archivo a IPFS."""
@@ -37,7 +76,9 @@ class IPFSManager:
 
     def conectar_nodo(self, direccion_peer):
         """Conecta el nodo actual a otro nodo IPFS."""
-        requests.post(self.ipfs_api + f"/swarm/connect?arg=/ip4/127.0.0.1/tcp/{direccion_peer}")
+        response = requests.post(self.ipfs_api + f"/swarm/connect?arg=/ip4/127.0.0.1/tcp/{direccion_peer}")
+        if response.status_code != 200:
+            print(f"Error al conectar al nodo {direccion_peer}: {response.text}")
 
 class Blockchain:
     """Clase que maneja la blockchain."""
@@ -77,15 +118,6 @@ class Blockchain:
 # Inicializar Blockchain y Nodos IPFS
 blockchain = Blockchain()
 nodos_ipfs = [IPFSManager(puerto) for puerto in NODO_PUERTOS]
-
-# Conectar nodos entre sí
-def conectar_nodos():
-    for i in range(len(nodos_ipfs)):
-        for j in range(len(nodos_ipfs)):
-            if i != j:
-                nodos_ipfs[i].conectar_nodo(NODO_PUERTOS[j])
-
-threading.Thread(target=conectar_nodos).start()
 
 @app.route("/subir_archivo", methods=['POST'])
 def subir_archivo():
