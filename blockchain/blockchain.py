@@ -11,7 +11,7 @@ app = Flask(__name__)
 IPFS_API = "http://127.0.0.1:5001/api/v0"
 
 class IPFSManager:
-    """ Clase para manejar la conexión con IPFS """
+    "Clase para manejar la conexión con IPFS"
     @staticmethod
     def subir_archivo(file):
         files = {'file': (file.filename, file.stream, file.content_type)}
@@ -21,7 +21,7 @@ class IPFSManager:
         return None
 
 class BlockchainManager:
-    """ Clase para manejar la cadena de bloques """
+    "Clase para manejar la cadena de bloques"
     def __init__(self):
         self.chain = []
         self.crear_bloque(prueba=1, hash_anterior='0', documento=None)
